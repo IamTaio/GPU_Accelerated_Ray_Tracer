@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="GPU_Accelerated_Ray_Tracer/GPU_Accelerated_Ray_Tracer.vcxproj" />
+</Solution>
