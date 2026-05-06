@@ -6,16 +6,10 @@ services:
     volumes:
       - .:/app:cached
       - /tmp/.X11-unix:/tmp/.X11-unix
-      # - /tmp/.X11-unix:/tmp/.X11-unix:rw   # For XWayland apps
-      # - ${XDG_RUNTIME_DIR}/wayland-0:/tmp/wayland-0   # For native Wayland apps
       - ${XAUTHORITY:-$HOME/.Xauthority}:/root/.Xauthority:rw
-
-      # - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      # - ${XAUTHORITY:-$HOME/.Xauthority}:/root/.Xauthority:rw
     network_mode: "host"
     environment:
       - DISPLAY=${DISPLAY}
-      # - WAYLAND_DISPLAY=${WAYLAND_DISPLAY}
     stdin_open: true
     tty: true
     working_dir: /app

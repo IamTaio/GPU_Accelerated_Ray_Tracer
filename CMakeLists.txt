@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 
 project(GPUAccRayTracer)
 
+# Container had issues finding glfw3
 find_package(glfw3 REQUIRED)
 
 add_executable(GPUAccRayTracer
@@ -19,4 +20,5 @@ target_include_directories(glad PUBLIC external/glad/include)
 
 target_link_libraries(GPUAccRayTracer PRIVATE glad)
 
+# GLFW
 target_link_libraries(GPUAccRayTracer PRIVATE glfw)
