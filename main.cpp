@@ -7,13 +7,13 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
-#include "common.h"
-#include "bvh.h"
-#include "camera.h"
-#include "hittable_list.h"
-#include "material.h"
-#include "sphere.h"
-#include "shader.h"
+#include "include/common.h"
+#include "include/bvh.h"
+#include "include/camera.h"
+#include "include/hittable_list.h"
+#include "include/material.h"
+#include "include/sphere.h"
+#include "include/shader.h"
 
 // settings
 const unsigned int IMAGE_WIDTH = 400;
