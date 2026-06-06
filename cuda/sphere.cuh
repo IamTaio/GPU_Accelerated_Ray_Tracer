@@ -1,39 +1,40 @@
 #pragma once
 
-#pragma once
-
-#include "hittable.h"
-#include "common.h"
+#include "hittable.cuh"
+#include "common.cuh"
 
 class sphere : public hittable {
 private:
 	ray center;
 	double radius;
-	shared_ptr<material> mat;
+	material* mat;
 	aabb bbox;
 
-	static void get_sphere_uv(const point3& p, double& u, double& v) {
-		auto theta = std::acos(-p.y());
-		auto phi = std::atan2(-p.z(), p.x()) + pi;
+	__host__ __device__ static void get_sphere_uv(const point3& p, double& u, double& v) {
+		auto theta = acos(-p.y());
+		auto phi = atan2(-p.z(), p.x()) + pi;
 
 		u = phi / (2 * pi);
 		v = theta / pi;
 	}
 
 public:
-	sphere(const point3& static_center, double radius, shared_ptr<material> mat) : center(static_center, vec3(0, 0, 0)), radius(std::fmax(0, radius)), mat(mat) {
+	
+	__host__ sphere(const point3& static_center, double radius, material* mat) : center(static_center, vec3(0, 0, 0)), radius(std::fmax(0, radius)), mat(mat) {
+		m_type = ShapeType::Sphere;
 		vec3 rvec = vec3(radius, radius, radius);
 		bbox = aabb(static_center - rvec, static_center + rvec);
 	}
 
-	sphere(const point3& center1, const point3& center2, double radius, shared_ptr<material> mat) : center(center1, center2 - center1), radius(std::fmax(0, radius)), mat(mat) {
+	__host__ sphere(const point3& center1, const point3& center2, double radius, material* mat) : center(center1, center2 - center1), radius(std::fmax(0, radius)), mat(mat) {
+		m_type = ShapeType::Sphere;
 		auto rvec = vec3(radius, radius, radius);
 		aabb box1(center.at(0) - rvec, center.at(0) + rvec);
 		aabb box2(center.at(1) - rvec, center.at(1) + rvec);
 		bbox = aabb(box1, box2);
 	}
 
-	bool hit(const ray& r, interval ray_t, hit_record& rec) const override {
+	__host__ __device__ bool hit(const ray& r, interval ray_t, hit_record& rec) const {
 		point3 current_center = center.at(r.time());
 		vec3 oc = current_center - r.origin();
 		auto a = r.direction().length_squared();
@@ -45,7 +46,7 @@ public:
 			return false;
 		}
 
-		auto sqrtd = std::sqrt(discriminant);
+		auto sqrtd = sqrt(discriminant);
 
 		auto root = (h - sqrtd) / a;
 		if (!ray_t.surrounds(root)) {
@@ -65,6 +66,6 @@ public:
 		return true;
 	}
 
-	aabb bounding_box() const override { return bbox; }
+	__host__ __device__ aabb bounding_box() const { return bbox; }
 
 };

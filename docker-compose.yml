@@ -13,3 +13,4 @@ services:
     stdin_open: true
     tty: true
     working_dir: /app
+    gpus: all

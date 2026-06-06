@@ -7,13 +7,16 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
-#include "include/common.h"
-#include "include/bvh.h"
-#include "include/camera.h"
-#include "include/hittable_list.h"
-#include "include/material.h"
-#include "include/sphere.h"
+#include "cuda/common.cuh"
+#include "cuda/bvh.cuh"
+#include "cuda/camera.cuh"
+#include "cuda/hittable_list.cuh"
+#include "cuda/material.cuh"
+#include "cuda/sphere.cuh"
 #include "include/shader.h"
+#include <cuda_runtime.h>
+
+#define nThreads 512
 
 // settings
 const unsigned int IMAGE_WIDTH = 400;
@@ -23,47 +26,75 @@ const unsigned int IMAGE_HEIGHT = int(IMAGE_WIDTH / ASPECT_RATIO);
 void save_frame(const char* filename, int image_height, int image_width, int channels, const std::vector<uint8_t>& buffer);
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 
-
-hittable_list build_scene() {
-    hittable_list world;
-
-    auto ground = make_shared<lambertian>(color(0.5, 0.5, 0.5));
-    world.add(make_shared<sphere>(point3(0, -1000, 0), 1000, ground));
-
-    world.add(make_shared<sphere>(point3(0, 1, 0), 1.0, make_shared<dielectric>(1.5)));
-    world.add(make_shared<sphere>(point3(-4, 1, 0), 1.0, make_shared<lambertian>(color(0.4, 0.2, 0.1))));
-    world.add(make_shared<sphere>(point3(4, 1, 0), 1.0, make_shared<metal>(color(0.7, 0.6, 0.5), 0.0)));
-
-    return hittable_list(make_shared<bvh_node>(world));
-}
-
-camera build_camera() {
-    camera cam;
-
-    cam.aspect_ratio = ASPECT_RATIO;
-    cam.image_width = IMAGE_WIDTH;
-    cam.samples_per_pixel = 100;
-    cam.max_depth = 50;
-
-    cam.vfov = 20;
-    cam.lookfrom = point3(13, 2, 3);
-    cam.lookat = point3(0, 0, 0);
-    cam.vup = vec3(0, 1, 0);
-
-    cam.defocus_angle = 0.6;
-    cam.focus_dist = 10.0;
-
-    return cam;
-}
-
 int main()
 {
     //SCENE
     // Scene
-    hittable_list world = build_scene();
-    camera cam = build_camera();
 
-    std::vector<uint8_t> buffer(IMAGE_WIDTH * IMAGE_HEIGHT * 3);
+    lambertian* ground_mat = NULL; 
+    cudaMallocManaged(&ground_mat, sizeof(lambertian));
+    new (ground_mat) lambertian(color(0.5, 0.5, 0.5));
+
+    lambertian* s2_mat = NULL;
+    cudaMallocManaged(&s2_mat, sizeof(lambertian));
+    new (s2_mat) lambertian(color(0.4, 0.2, 0.1));
+
+    dielectric* s1_mat = NULL; 
+    cudaMallocManaged(&s1_mat, sizeof(dielectric));
+    new (s1_mat) dielectric(1.5);
+
+    metal* s3_mat = NULL;
+    cudaMallocManaged(&s3_mat, sizeof(metal));
+    new (s3_mat) metal(color(0.7, 0.6, 0.5), 0.0);
+
+    sphere* ground = NULL;
+    cudaMallocManaged(&ground, sizeof(sphere));
+    new (ground) sphere(point3(0, -1000, 0), 1000, ground_mat);
+
+    sphere* s1 = NULL;
+    cudaMallocManaged(&s1, sizeof(sphere));
+    new (s1) sphere(point3(0, 1, 0), 1.0, s1_mat);
+
+    sphere* s2 = NULL;
+    cudaMallocManaged(&s2, sizeof(sphere));
+    new (s2) sphere(point3(-4, 1, 0), 1.0, s2_mat);
+
+    sphere* s3 = NULL;
+    cudaMallocManaged(&s3, sizeof(sphere));
+    new (s3) sphere(point3(4, 1, 0), 1.0, s3_mat);
+
+    hittable_list* world = NULL;
+    cudaMallocManaged(&world, sizeof(hittable_list));
+    new (world) hittable_list();
+
+    world->add(ground);
+    world->add(s1);
+    world->add(s2);
+    world->add(s3);
+
+    camera* cam = NULL;
+    cudaMallocManaged(&cam, sizeof(camera));
+    new (cam) camera();
+    
+    cam->aspect_ratio = ASPECT_RATIO;
+    cam->image_width = IMAGE_WIDTH;
+    cam->samples_per_pixel = 100;
+    cam->max_depth = 50;
+
+    cam->vfov = 20;
+    cam->lookfrom = point3(13, 2, 3);
+    cam->lookat = point3(0, 0, 0);
+    cam->vup = vec3(0, 1, 0);
+
+    cam->defocus_angle = 0.6;
+    cam->focus_dist = 10.0;
+
+    size_t buffer_size = IMAGE_WIDTH * IMAGE_HEIGHT * 3 * sizeof(uint8_t);
+    uint8_t* buffer_d;
+    cudaMalloc((void**) &buffer_d, buffer_size);
+
+    uint8_t* buffer_h;
+    cudaMallocHost((void**) &buffer_h, buffer_size);
 
     // GLFW
     glfwInit();
@@ -124,7 +155,7 @@ int main()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     // Render and upload
-    std::thread t1([&]() { cam.render(world, buffer); });
+    render<<<(IMAGE_HEIGHT * IMAGE_WIDTH)/nThreads, nThreads>>>(*world, cam, nullptr, buffer_d);
     
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, IMAGE_WIDTH, IMAGE_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
 
@@ -132,15 +163,16 @@ int main()
 
     // Loop
     while (!glfwWindowShouldClose(window)) {
+        
         bool s_pressed = glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS;
         if (s_pressed && !s_was_pressed) {
-            save_frame("output.png", IMAGE_HEIGHT, IMAGE_WIDTH, 3, buffer);
+            save_frame("output.png", IMAGE_HEIGHT, IMAGE_WIDTH, 3, buffer_h);
         }
         s_was_pressed = s_pressed;
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, buffer.data());
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, buffer_h);
 
         shader.use();
         glBindVertexArray(VAO);
@@ -149,13 +181,24 @@ int main()
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
-    t1.join();
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
     glDeleteBuffers(1, &EBO);
     glDeleteTextures(1, &tex);
     glfwTerminate();
 
+    cudaFree(ground_mat);
+    cudaFree(ground);
+    cudaFree(s1_mat);
+    cudaFree(s1);
+    cudaFree(s2_mat);
+    cudaFree(s2);
+    cudaFree(s3_mat);
+    cudaFree(s3);
+    cudaFree(world);
+    cudaFree(cam);
+    cudaFree(buffer_d);
+    cudaFreeHost(buffer_h);
     return 0;
 }
 
@@ -168,8 +211,8 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
     glViewport(0, 0, width, height);
 }
 
-void save_frame(const char* filename, int image_height, int image_width, int channels,const std::vector<uint8_t>& buffer) {
-    if (stbi_write_png(filename, image_width, image_height, channels, buffer.data(), image_width * channels)) {
+void save_frame(const char* filename, int image_height, int image_width, int channels,const uint8_t* buffer) {
+    if (stbi_write_png(filename, image_width, image_height, channels, buffer, image_width * channels)) {
         std::cout << "Image successfully saved to: " << filename << "\n";
     }
     else {

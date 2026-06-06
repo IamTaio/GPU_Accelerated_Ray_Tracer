@@ -2,23 +2,24 @@
 
 #pragma once
 
-#include "aabb.h"
-#include "hittable.h"
-#include "hittable_list.h"
+#include "aabb.cuh"
+#include "hittable.cuh"
+#include "hittable_list.cuh"
 
-#include <algorithm>
+#include <thrust/sort.h>
+#include <thrust/device_vector.h>
 
 class bvh_node : public hittable {
 public:
-	bvh_node(hittable_list list) : bvh_node(list.objects, 0, list.objects.size()) {
+	__device__ bvh_node(hittable_list list) : bvh_node(list.objects, 0, list.objects.size()) {
 
 	}
 
-	bvh_node(std::vector<shared_ptr<hittable>>& objects, size_t start, size_t end) {
+	__device__ bvh_node(thrust::device_vector<hittable*>& objects, size_t start, size_t end) {
 		bbox = aabb::empty;
 
 		for (size_t object_index = start; object_index < end; object_index++) {
-			bbox = aabb(bbox, objects[object_index]->bounding_box());
+			bbox = aabb(bbox, (*objects[object_index]).bounding_box());
 		}
 
 		int axis = bbox.longest_axis();
@@ -37,15 +38,15 @@ public:
 			right = objects[start + 1];
 		}
 		else {
-			std::sort(std::begin(objects) + start, std::begin(objects) + end, comparator);
+			thrust::sort(objects.begin() + start, objects.begin() + end, comparator);
 
 			auto mid = start + object_span / 2;
-			left = make_shared<bvh_node>(objects, start, mid);
-			right = make_shared<bvh_node>(objects, mid, end);
+			left = &bvh_node(objects, start, mid);
+			right = &bvh_node(objects, mid, end);
 		}
 	}
 
-	bool hit(const ray& r, interval ray_t, hit_record& rec) const override {
+	__device__ bool hit(const ray& r, interval ray_t, hit_record& rec) const {
 		if (!bbox.hit(r, ray_t)) {
 			return false;
 		}
@@ -56,28 +57,28 @@ public:
 		return hit_left || hit_right;
 	}
 
-	aabb bounding_box() const override { return bbox; }
+	__device__ aabb bounding_box() const { return bbox; }
 
 private:
-	shared_ptr<hittable> left;
-	shared_ptr<hittable> right;
+	hittable* left;
+	hittable* right;
 	aabb bbox;
 
-	static bool box_compare(const shared_ptr<hittable> a, const shared_ptr<hittable> b, int axis_index) {
+	__device__ static bool box_compare(const hittable* a, const hittable* b, int axis_index) {
 		auto a_axis_interval = a->bounding_box()[axis_index];
 		auto b_axis_interval = b->bounding_box()[axis_index];
 		return a_axis_interval.min < b_axis_interval.min;
 	}
 
-	static bool box_x_compare(const shared_ptr<hittable> a, const shared_ptr<hittable> b) {
+	__device__ static bool box_x_compare(const hittable* a, const hittable* b) {
 		return box_compare(a, b, 0);
 	}
 
-	static bool box_y_compare(const shared_ptr<hittable> a, const shared_ptr<hittable> b) {
+	__device__ static bool box_y_compare(const hittable* a, const hittable* b) {
 		return box_compare(a, b, 1);
 	}
 
-	static bool box_z_compare(const shared_ptr<hittable> a, const shared_ptr<hittable> b) {
+	__device__ static bool box_z_compare(const hittable* a, const hittable* b) {
 		return box_compare(a, b, 2);
 	}
 };
