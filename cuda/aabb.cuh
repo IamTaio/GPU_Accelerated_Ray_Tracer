@@ -37,7 +37,7 @@ public:
 		return x;
 	}
 
-	__host__ __device__ bool hit(const ray& r, interval ray_t) const {
+	__device__ bool hit(const ray& r, interval ray_t) const {
 		const point3& ray_orig = r.origin();
 		const vec3& ray_dir = r.direction();
 
@@ -48,8 +48,8 @@ public:
 			double t0 = (ax.min - ray_orig[axis]) * inverse_dir;
 			double t1 = (ax.max - ray_orig[axis]) * inverse_dir;
 
-			ray_t.min = fmax(ray_t.min, fmin(t0, t1));
-			ray_t.max = fmin(ray_t.max, fmax(t0, t1));
+			ray_t.min = fmaxf(ray_t.min, fminf(t0, t1));
+			ray_t.max = fminf(ray_t.max, fmaxf(t0, t1));
 
 			if (ray_t.max <= ray_t.min) return false;
 		}
@@ -68,5 +68,5 @@ public:
 		}
 	}
 
-	static __constant__ aabb empty, universe;
+	static const aabb empty, universe;
 };

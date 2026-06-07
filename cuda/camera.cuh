@@ -33,7 +33,7 @@ public:
 	double defocus_angle = 0;
 	double focus_dist = 10;
 
-	__host__ void initialize() {
+	__device__ void initialize() {
 		image_height = int(image_width / aspect_ratio);
 		image_height = (image_height < 1) ? 1 : image_height;
 
@@ -43,7 +43,7 @@ public:
 
 		// Determine viewport dimensions.
 		auto theta = degrees_to_radians(vfov);
-		auto h = std::tan(theta / 2);
+		auto h = tan(theta / 2);
 		auto viewport_height = 2 * h * focus_dist;
 		auto viewport_width = viewport_height * (double(image_width) / image_height);
 
@@ -62,7 +62,7 @@ public:
 		auto viewport_upper_left = center - (focus_dist * w) - viewport_u / 2 - viewport_v / 2;
 		pixel00_loc = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
 
-		auto defocus_radius = focus_dist * std::tan(degrees_to_radians(defocus_angle / 2));
+		auto defocus_radius = focus_dist * tan(degrees_to_radians(defocus_angle / 2));
 		defocus_disk_u = u * defocus_radius;
 		defocus_disk_v = v * defocus_radius;
 	}
@@ -113,26 +113,3 @@ public:
 	}
 
 };
-
-__global__ void render(const hittable& world, camera* cam, seed_t* states, uint8_t* buffer) {
-
-		int pixel_x = blockIdx.x * blockDim.x + threadIdx.x;
-		int pixel_y = blockIdx.y * blockDim.y + threadIdx.y;
-		
-		if(!(pixel_x < cam->image_width && pixel_y < cam->image_height)){
-			return;
-		}
-
-		int index = pixel_y * cam->image_width + pixel_x;
-		seed_t local_state = states[index];
-
-		// std::cout << "P3\n" << image_width << ' ' << image_height << "\n255\n";
-		
-		color pixel_color(0, 0, 0);
-		for (int sample = 0; sample < cam->samples_per_pixel; sample++) {
-			ray r = cam->get_ray(pixel_y, pixel_x, local_state);
-			pixel_color += cam->ray_color(r, cam->max_depth, world, local_state);
-		}
-		// write_color(std::cout, cam.pixel_samples_scale * pixel_color);
-		// std::clog << "\rDone.                                      \n";
-}

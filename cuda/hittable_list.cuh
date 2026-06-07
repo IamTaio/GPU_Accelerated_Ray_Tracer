@@ -8,20 +8,20 @@ class hittable_list : public hittable {
 public:
 	thrust::device_vector<hittable*> objects;
 
-	__device__ hittable_list() {}
-	__device__ hittable_list(hittable* object) { add(object); }
+	__host__ hittable_list() {}
+	__host__ hittable_list(hittable* object) { add(object); }
 
 	
-	__device__ void clear() { 
+	__host__ void clear() { 
 		objects.clear();
 	 }
 
-	__device__ void add(hittable* object) {
+	__host__ void add(hittable* object) {
 		objects.push_back(object);
 		bbox = aabb(bbox, object->bounding_box());
 	}
 
-	__device__ bool hit(const ray& r, interval ray_t, hit_record& rec) const {
+	__device__ bool hit(const ray& r, interval ray_t, hit_record& rec) const override{
 		hit_record temp_rec;
 		bool hit_anything = false;
 		auto closest_so_far = ray_t.max;
@@ -36,7 +36,7 @@ public:
 
 		return hit_anything;
 	}
-	__device__ aabb bounding_box() const { return bbox; }
+	__host__ __device__ aabb bounding_box() const override { return bbox; }
 
 private:
 	aabb bbox;

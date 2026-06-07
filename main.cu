@@ -23,13 +23,73 @@ const unsigned int IMAGE_WIDTH = 400;
 const double ASPECT_RATIO = 16.0 / 9.0;
 const unsigned int IMAGE_HEIGHT = int(IMAGE_WIDTH / ASPECT_RATIO);
 
-void save_frame(const char* filename, int image_height, int image_width, int channels, const std::vector<uint8_t>& buffer);
+void save_frame(const char* filename, int image_height, int image_width, int channels, const uint8_t* buffer);
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
+
+__global__ void init_camera(camera* cam){
+    cam->aspect_ratio = ASPECT_RATIO;
+    cam->image_width = IMAGE_WIDTH;
+    cam->samples_per_pixel = 100;
+    cam->max_depth = 50;
+
+    cam->vfov = 20;
+    cam->lookfrom = point3(13, 2, 3);
+    cam->lookat = point3(0, 0, 0);
+    cam->vup = vec3(0, 1, 0);
+
+    cam->defocus_angle = 0.6;
+    cam->focus_dist = 10.0;
+    cam->initialize();
+}
+
+__global__ void initialize_random_states(seed_t* states, int width, int height, unsigned long long seed){
+	int pixel_x = blockIdx.x * blockDim.x + threadIdx.x;
+	int pixel_y = blockIdx.y * blockDim.y + threadIdx.y;
+	
+	if(!(pixel_x < width && pixel_y < height)){
+		return;
+	}
+
+	int index = pixel_y * width + pixel_x;
+	curand_init(seed, index, 0, &states[index]);
+}
+
+__global__ void render(const hittable& world, camera* cam, seed_t* states, uint8_t* buffer) {
+
+		int pixel_x = blockIdx.x * blockDim.x + threadIdx.x;
+		int pixel_y = blockIdx.y * blockDim.y + threadIdx.y;
+		
+		if(!(pixel_x < cam->image_width && pixel_y < cam->image_height)){
+			return;
+		}
+
+		int index = pixel_y * cam->image_width + pixel_x;
+		seed_t local_state = states[index];
+
+		// std::cout << "P3\n" << image_width << ' ' << image_height << "\n255\n";
+		
+		color pixel_color(0, 0, 0);
+		for (int sample = 0; sample < cam->samples_per_pixel; sample++) {
+			ray r = cam->get_ray(pixel_y, pixel_x, local_state);
+			pixel_color += cam->ray_color(r, cam->max_depth, world, local_state);
+		}
+
+		for (int channel = 0; channel < 3; channel++) {
+			buffer[index * 3 + channel] = pixel_color[channel];
+		}
+		// write_color(std::cout, cam.pixel_samples_scale * pixel_color);
+		// std::clog << "\rDone.                                      \n";
+}
+
 
 int main()
 {
     //SCENE
     // Scene
+    cudaSetDevice(1);
+    size_t num_objects = 4;
+    hittable** objects = NULL;
+    cudaMallocManaged(&objects, sizeof(hittable*)*num_objects);
 
     lambertian* ground_mat = NULL; 
     cudaMallocManaged(&ground_mat, sizeof(lambertian));
@@ -75,32 +135,26 @@ int main()
     camera* cam = NULL;
     cudaMallocManaged(&cam, sizeof(camera));
     new (cam) camera();
-    
-    cam->aspect_ratio = ASPECT_RATIO;
-    cam->image_width = IMAGE_WIDTH;
-    cam->samples_per_pixel = 100;
-    cam->max_depth = 50;
 
-    cam->vfov = 20;
-    cam->lookfrom = point3(13, 2, 3);
-    cam->lookat = point3(0, 0, 0);
-    cam->vup = vec3(0, 1, 0);
-
-    cam->defocus_angle = 0.6;
-    cam->focus_dist = 10.0;
+    init_camera<<<1,1>>>(cam);
+    cudaDeviceSynchronize();
 
     size_t buffer_size = IMAGE_WIDTH * IMAGE_HEIGHT * 3 * sizeof(uint8_t);
-    uint8_t* buffer_d;
+    uint8_t* buffer_d = NULL;
     cudaMalloc((void**) &buffer_d, buffer_size);
 
-    uint8_t* buffer_h;
+    uint8_t* buffer_h = NULL;
     cudaMallocHost((void**) &buffer_h, buffer_size);
+
+    seed_t* states = NULL;
+    cudaMalloc((void**) &states, IMAGE_WIDTH * IMAGE_HEIGHT * sizeof(seed_t));
 
     // GLFW
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    glfwWindowHint(GLFW_CONTEXT_CREATION_API, GLFW_NATIVE_CONTEXT_API);
 
     GLFWwindow* window = glfwCreateWindow(IMAGE_WIDTH, IMAGE_HEIGHT, "Ray Tracer", NULL, NULL);
     if (!window) {
@@ -155,9 +209,11 @@ int main()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     // Render and upload
-    render<<<(IMAGE_HEIGHT * IMAGE_WIDTH)/nThreads, nThreads>>>(*world, cam, nullptr, buffer_d);
+    initialize_random_states<<<(IMAGE_HEIGHT * IMAGE_WIDTH)/nThreads, nThreads>>>(states, IMAGE_WIDTH, IMAGE_HEIGHT, 1234ULL);
+    render<<<(IMAGE_HEIGHT * IMAGE_WIDTH)/nThreads, nThreads>>>(*world, cam, states, buffer_d);
+    cudaMemcpy(buffer_h, buffer_d, buffer_size, cudaMemcpyDeviceToHost);
     
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, IMAGE_WIDTH, IMAGE_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, IMAGE_WIDTH, IMAGE_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, buffer_h);
 
     bool s_was_pressed = false;
 
@@ -171,6 +227,9 @@ int main()
         s_was_pressed = s_pressed;
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
+        initialize_random_states<<<(IMAGE_HEIGHT * IMAGE_WIDTH)/nThreads, nThreads>>>(states, IMAGE_WIDTH, IMAGE_HEIGHT, 1234ULL);
+        render<<<(IMAGE_HEIGHT * IMAGE_WIDTH)/nThreads, nThreads>>>(*world, cam, states, buffer_d);
+        cudaMemcpy(buffer_h, buffer_d, buffer_size, cudaMemcpyDeviceToHost);
 
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, buffer_h);
 
@@ -198,6 +257,8 @@ int main()
     cudaFree(world);
     cudaFree(cam);
     cudaFree(buffer_d);
+    cudaFree(states); 
+    cudaFree(objects);
     cudaFreeHost(buffer_h);
     return 0;
 }

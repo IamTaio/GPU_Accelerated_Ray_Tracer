@@ -16,6 +16,8 @@ public:
 	}
 
 	__device__ bvh_node(thrust::device_vector<hittable*>& objects, size_t start, size_t end) {
+		left = (bvh_node*)malloc(sizeof(bvh_node));
+		right = (bvh_node*)malloc(sizeof(bvh_node));
 		bbox = aabb::empty;
 
 		for (size_t object_index = start; object_index < end; object_index++) {
@@ -41,8 +43,11 @@ public:
 			thrust::sort(objects.begin() + start, objects.begin() + end, comparator);
 
 			auto mid = start + object_span / 2;
-			left = &bvh_node(objects, start, mid);
-			right = &bvh_node(objects, mid, end);
+			
+			new (left) bvh_node(objects, start, mid);
+			new (right) bvh_node(objects, mid, end);
+			// left = &bvh_node(objects, start, mid);
+			// right = &bvh_node(objects, mid, end);
 		}
 	}
 
@@ -57,7 +62,7 @@ public:
 		return hit_left || hit_right;
 	}
 
-	__device__ aabb bounding_box() const { return bbox; }
+	__host__ __device__ aabb bounding_box() const { return bbox; }
 
 private:
 	hittable* left;
