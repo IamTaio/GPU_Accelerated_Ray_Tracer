@@ -6,9 +6,9 @@ class interval {
 public:
 	double min, max;
 
-	 __device__ interval() : min(+infinity), max(-infinity) {}
+	constexpr __device__ interval() : min(+infinity), max(-infinity) {}
 
-	 __device__ interval(double min, double max) : min(min), max(max) {}
+	constexpr __device__ interval(double min, double max) : min(min), max(max) {}
 
 	 __device__ interval(const interval& a, const interval& b) {
 		min = fminf(a.min, b.min);
@@ -38,8 +38,16 @@ public:
 		return interval(min - padding, max + padding);
 	}
 
-	static const interval empty, universe;
+	__device__ static interval empty(){
+		return interval(+infinity, -infinity);
+	}
+
+	__device__ static interval universe(){
+		return interval(-infinity, +infinity);
+	}
+	
 };
+
 
 
 

@@ -7,9 +7,9 @@ class aabb {
 public:
 	interval x, y, z;
 
-	__device__ aabb() {}
+	constexpr __device__ aabb() {}
 
-	__device__ aabb(const interval& x, const interval& y, const interval& z) : x(x), y(y), z(z) {}
+	constexpr __device__ aabb(const interval& x, const interval& y, const interval& z) : x(x), y(y), z(z) {}
 
 	__device__ aabb(const point3& a, const point3& b) {
 		// The points a and b represent two extremas of the bounding box.
@@ -68,5 +68,11 @@ public:
 		}
 	}
 
-	static const aabb empty, universe;
+	__device__ static aabb empty() {
+        return aabb(interval::empty(), interval::empty(), interval::empty());
+    }
+
+	__device__ static aabb universe() {
+        return aabb(interval::universe(), interval::universe(), interval::universe());
+    }
 };

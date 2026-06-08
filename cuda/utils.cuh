@@ -6,8 +6,8 @@
 #include <random>
 #include <curand.h>
 #include <curand_kernel.h>
-const double infinity = DBL_MAX;
-const double pi = 3.1415926535897932385;
+constexpr double infinity = DBL_MAX;
+constexpr double pi = 3.1415926535897932385;
 typedef curandState seed_t;
 
  __device__ inline double degrees_to_radians(double degrees) {

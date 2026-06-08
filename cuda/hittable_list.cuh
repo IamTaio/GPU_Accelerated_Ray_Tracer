@@ -7,15 +7,17 @@
 #define OBJS_MAX_SIZE 1024
 class hittable_list : public hittable {
 public:
-	int capacity = 0;
+	int capacity;
 	hittable** objects;
 
-	__device__ hittable_list() {
-		objects = new hittable*[OBJS_MAX_SIZE];
+	__device__ hittable_list(): capacity(0), objects(new hittable*[OBJS_MAX_SIZE]), bbox(aabb::empty()) {}
+
+	__device__ hittable_list(hittable* obj): hittable_list(){
+		add(obj);
+		capacity = 1;
 	}
 
-	__device__ hittable_list(hittable** objs, int cap) {
-		objects = new hittable*[OBJS_MAX_SIZE];
+	__device__ hittable_list(hittable** objs, int cap): hittable_list() {
 		for(int i = 0; i < cap; i++)
 			add(objs[i]);
 		capacity = cap;
