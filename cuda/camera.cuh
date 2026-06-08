@@ -67,7 +67,7 @@ public:
 		defocus_disk_v = v * defocus_radius;
 	}
 
-	__device__ ray get_ray(int i, int j, seed_t seed) const {
+	__device__ ray get_ray(int i, int j, seed_t* seed) const {
 		// Construct a camera ray originating from the defocus disk and directed at a randomly
 		// sampled point around the pixel location i, j.
 
@@ -81,35 +81,42 @@ public:
 		return ray(ray_origin, ray_direction, ray_time);
 	}
 
-	__device__ point3 defocus_disk_sample(seed_t seed) const {
+	__device__ point3 defocus_disk_sample(seed_t* seed) const {
 		auto p = random_in_unit_disk(seed);
 		return center + (p[0] * defocus_disk_u) + (p[1] * defocus_disk_v);
 	}
 
-	__device__ vec3 sample_square(seed_t seed) const {
+	__device__ vec3 sample_square(seed_t* seed) const {
 		// Returns the vector to a random point in the [-.5, -.5] to [.5, .5] unit square.
 		return vec3(random_double(seed) - 0.5, random_double(seed) - 0.5, 0);
 	}
 
-	__device__ color ray_color(const ray& r, int depth, const hittable& world, seed_t seed) const {
-		if (depth <= 0) {
-			return color(0, 0, 0);
-		}
+	__device__ color ray_color(ray r, int depth, const hittable& world, seed_t* seed) const {
 
-		hit_record rec;
+		color result = color(1, 1, 1);
+		for (int i = 0; i < depth; i++){
+			hit_record rec;
 
-		if (world.hit(r, interval(0.001, infinity), rec)) {
-			ray scattered;
-			color attenuation;
-			if (rec.mat->scatter(r, rec, attenuation, scattered, seed)) {
-				return attenuation * ray_color(scattered, depth - 1, world, seed);
+			if (world.hit(r, interval(0.001, infinity), rec)) {
+				ray scattered;
+				color attenuation;
+				if (rec.mat->scatter(r, rec, attenuation, scattered, seed)) {
+					result = result * attenuation;
+					r = scattered;
+				} else {
+					return color(0, 0, 0);
+				}
+				
+			} else {
+				vec3 unit_direction = unit_vector(r.direction());
+				auto a = 0.5 * (unit_direction.y() + 1.0);
+				color background = (1.0 - a) * color(1.0, 1.0, 1.0) + a * color(0.5, 0.7, 1.0);
+				return result * background;
 			}
-			return color(0, 0, 0);
-		}
 
-		vec3 unit_direction = unit_vector(r.direction());
-		auto a = 0.5 * (unit_direction.y() + 1.0);
-		return (1.0 - a) * color(1.0, 1.0, 1.0) + a * color(0.5, 0.7, 1.0);
+		}
+		return color(0, 0, 0);
+
 	}
 
 };

@@ -5,14 +5,14 @@
 
 using color = vec3;
 
-__host__ __device__ inline double linear_to_gamma(double linear_component) {
+ __device__ inline double linear_to_gamma(double linear_component) {
     if (linear_component > 0) {
         return sqrt(linear_component);
     }
     return 0;
 }
 
-// __host__ inline void write_color(std::ostream& out, const color& pixel_color) {
+//  inline void write_color(std::ostream& out, const color& pixel_color) {
 //     auto r = linear_to_gamma(pixel_color.x());
 //     auto g = linear_to_gamma(pixel_color.y());
 //     auto b = linear_to_gamma(pixel_color.z());
@@ -28,7 +28,7 @@ __host__ __device__ inline double linear_to_gamma(double linear_component) {
 //     out << rbyte << ' ' << gbyte << ' ' << bbyte << '\n';
 // }
 
-__host__ __device__ inline void get_colors(const color& pixel_color, uint8_t* out) {
+ __device__ inline void get_colors(const color& pixel_color, uint8_t* out) {
     auto r = linear_to_gamma(pixel_color.x());
     auto g = linear_to_gamma(pixel_color.y());
     auto b = linear_to_gamma(pixel_color.z());

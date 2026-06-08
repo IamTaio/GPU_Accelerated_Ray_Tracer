@@ -16,30 +16,64 @@
 #include "include/shader.h"
 #include <cuda_runtime.h>
 
-#define nThreads 512
-
 // settings
-const unsigned int IMAGE_WIDTH = 400;
-const double ASPECT_RATIO = 16.0 / 9.0;
-const unsigned int IMAGE_HEIGHT = int(IMAGE_WIDTH / ASPECT_RATIO);
+#define nThreads 512
+#define IMAGE_WIDTH 400
+#define ASPECT_RATIO (16.0 / 9.0)
+#define IMAGE_HEIGHT ((int)(IMAGE_WIDTH / ASPECT_RATIO))
+#define WORLD_SIZE 4
+
+
+__global__ void add(int *a, int *b, int *c) {
+*c = *a + *b;
+}
 
 void save_frame(const char* filename, int image_height, int image_width, int channels, const uint8_t* buffer);
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 
-__global__ void init_camera(camera* cam){
-    cam->aspect_ratio = ASPECT_RATIO;
-    cam->image_width = IMAGE_WIDTH;
-    cam->samples_per_pixel = 100;
-    cam->max_depth = 50;
+#define CUDA_CHECK(call)                                                          \
+do {                                                                              \
+    cudaError_t err = call;                                                       \
+    if (err != cudaSuccess) {                                                     \
+        fprintf(stderr, "CUDA error in file '%s' at line %d: %s\n",               \
+                __FILE__, __LINE__, cudaGetErrorString(err));                     \
+        exit(EXIT_FAILURE);                                                       \
+    }                                                                             \
+} while (0)
 
-    cam->vfov = 20;
-    cam->lookfrom = point3(13, 2, 3);
-    cam->lookat = point3(0, 0, 0);
-    cam->vup = vec3(0, 1, 0);
+__global__ void init_scene(hittable** list_d, hittable** world_d, camera** cam_d){
 
-    cam->defocus_angle = 0.6;
-    cam->focus_dist = 10.0;
-    cam->initialize();
+    *cam_d = new camera();
+    (*cam_d)->aspect_ratio = ASPECT_RATIO;
+    (*cam_d)->image_width = IMAGE_WIDTH;
+    (*cam_d)->samples_per_pixel = 100;
+    (*cam_d)->max_depth = 50;
+
+    (*cam_d)->vfov = 20;
+    (*cam_d)->lookfrom = point3(13, 2, 3);
+    (*cam_d)->lookat = point3(0, 0, 0);
+    (*cam_d)->vup = vec3(0, 1, 0);
+
+    (*cam_d)->defocus_angle = 0.6;
+    (*cam_d)->focus_dist = 10.0;
+    (*cam_d)->initialize();
+
+    size_t i = 0;
+    list_d[i++] = new sphere(point3(0, -1000, 0), 1000, new lambertian(color(0.5, 0.5, 0.5)));
+    list_d[i++] = new sphere(point3(0, 1, 0), 1.0, new dielectric(1.5));
+    list_d[i++] = new sphere(point3(-4, 1, 0), 1.0, new lambertian(color(0.4, 0.2, 0.1)));
+    list_d[i++] = new sphere(point3(4, 1, 0), 1.0, new metal(color(0.7, 0.6, 0.5), 0.0));
+    *world_d = new hittable_list(list_d, i);
+}
+
+__global__ void free_world(hittable** list_d, hittable** world_d, camera** camera_d) {
+
+    for(int i=0; i < WORLD_SIZE; i++) {
+        delete ((sphere *)list_d[i])->mat;
+        delete list_d[i];
+    }
+    delete *world_d;
+    delete *camera_d;
 }
 
 __global__ void initialize_random_states(seed_t* states, int width, int height, unsigned long long seed){
@@ -54,29 +88,26 @@ __global__ void initialize_random_states(seed_t* states, int width, int height, 
 	curand_init(seed, index, 0, &states[index]);
 }
 
-__global__ void render(const hittable& world, camera* cam, seed_t* states, uint8_t* buffer) {
+__global__ void render(hittable** world, camera** cam, seed_t* states, uint8_t* buffer) {
 
 		int pixel_x = blockIdx.x * blockDim.x + threadIdx.x;
 		int pixel_y = blockIdx.y * blockDim.y + threadIdx.y;
 		
-		if(!(pixel_x < cam->image_width && pixel_y < cam->image_height)){
+		if(!(pixel_x < (*cam)->image_width && pixel_y < (*cam)->image_height)){
 			return;
 		}
 
-		int index = pixel_y * cam->image_width + pixel_x;
+		int index = pixel_y * (*cam)->image_width + pixel_x;
 		seed_t local_state = states[index];
 
 		// std::cout << "P3\n" << image_width << ' ' << image_height << "\n255\n";
 		
 		color pixel_color(0, 0, 0);
-		for (int sample = 0; sample < cam->samples_per_pixel; sample++) {
-			ray r = cam->get_ray(pixel_y, pixel_x, local_state);
-			pixel_color += cam->ray_color(r, cam->max_depth, world, local_state);
+		for (int sample = 0; sample < (*cam)->samples_per_pixel; sample++) {
+			ray r = (*cam)->get_ray(pixel_x, pixel_y, &local_state);
+			pixel_color += (*cam)->ray_color(r, (*cam)->max_depth, **world, &local_state);
 		}
-
-		for (int channel = 0; channel < 3; channel++) {
-			buffer[index * 3 + channel] = pixel_color[channel];
-		}
+			get_colors((*cam)->pixel_samples_scale * pixel_color, &buffer[index * 3]);
 		// write_color(std::cout, cam.pixel_samples_scale * pixel_color);
 		// std::clog << "\rDone.                                      \n";
 }
@@ -84,70 +115,35 @@ __global__ void render(const hittable& world, camera* cam, seed_t* states, uint8
 
 int main()
 {
-    //SCENE
-    // Scene
-    cudaSetDevice(1);
-    size_t num_objects = 4;
-    hittable** objects = NULL;
-    cudaMallocManaged(&objects, sizeof(hittable*)*num_objects);
 
-    lambertian* ground_mat = NULL; 
-    cudaMallocManaged(&ground_mat, sizeof(lambertian));
-    new (ground_mat) lambertian(color(0.5, 0.5, 0.5));
+    hittable** list_d;
+    CUDA_CHECK(cudaMalloc((void**) &list_d, sizeof(hittable*) * WORLD_SIZE));
 
-    lambertian* s2_mat = NULL;
-    cudaMallocManaged(&s2_mat, sizeof(lambertian));
-    new (s2_mat) lambertian(color(0.4, 0.2, 0.1));
+    hittable** world_d;
+    CUDA_CHECK(cudaMalloc((void**) &world_d, sizeof(hittable*)));
 
-    dielectric* s1_mat = NULL; 
-    cudaMallocManaged(&s1_mat, sizeof(dielectric));
-    new (s1_mat) dielectric(1.5);
-
-    metal* s3_mat = NULL;
-    cudaMallocManaged(&s3_mat, sizeof(metal));
-    new (s3_mat) metal(color(0.7, 0.6, 0.5), 0.0);
-
-    sphere* ground = NULL;
-    cudaMallocManaged(&ground, sizeof(sphere));
-    new (ground) sphere(point3(0, -1000, 0), 1000, ground_mat);
-
-    sphere* s1 = NULL;
-    cudaMallocManaged(&s1, sizeof(sphere));
-    new (s1) sphere(point3(0, 1, 0), 1.0, s1_mat);
-
-    sphere* s2 = NULL;
-    cudaMallocManaged(&s2, sizeof(sphere));
-    new (s2) sphere(point3(-4, 1, 0), 1.0, s2_mat);
-
-    sphere* s3 = NULL;
-    cudaMallocManaged(&s3, sizeof(sphere));
-    new (s3) sphere(point3(4, 1, 0), 1.0, s3_mat);
-
-    hittable_list* world = NULL;
-    cudaMallocManaged(&world, sizeof(hittable_list));
-    new (world) hittable_list();
-
-    world->add(ground);
-    world->add(s1);
-    world->add(s2);
-    world->add(s3);
-
-    camera* cam = NULL;
-    cudaMallocManaged(&cam, sizeof(camera));
-    new (cam) camera();
-
-    init_camera<<<1,1>>>(cam);
-    cudaDeviceSynchronize();
-
+    camera** cam_d;
+    CUDA_CHECK(cudaMalloc((void**) &cam_d, sizeof(camera*)));
+    
     size_t buffer_size = IMAGE_WIDTH * IMAGE_HEIGHT * 3 * sizeof(uint8_t);
-    uint8_t* buffer_d = NULL;
-    cudaMalloc((void**) &buffer_d, buffer_size);
 
-    uint8_t* buffer_h = NULL;
-    cudaMallocHost((void**) &buffer_h, buffer_size);
+    uint8_t* buffer_d;
+    CUDA_CHECK(cudaMalloc((void**) &buffer_d, buffer_size));
 
-    seed_t* states = NULL;
-    cudaMalloc((void**) &states, IMAGE_WIDTH * IMAGE_HEIGHT * sizeof(seed_t));
+    uint8_t* buffer_h;
+    CUDA_CHECK(cudaMallocHost((void**) &buffer_h, buffer_size));
+
+    seed_t* states_d;
+    CUDA_CHECK(cudaMalloc((void**) &states_d, IMAGE_WIDTH * IMAGE_HEIGHT * sizeof(seed_t)));
+
+    int tx = 8; int ty = 8;
+    dim3 blocks(IMAGE_WIDTH/tx+1,IMAGE_HEIGHT/ty+1);
+    dim3 threads(tx,ty);
+
+    init_scene<<<1,1>>>(list_d, world_d, cam_d);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+
 
     // GLFW
     glfwInit();
@@ -209,9 +205,12 @@ int main()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     // Render and upload
-    initialize_random_states<<<(IMAGE_HEIGHT * IMAGE_WIDTH)/nThreads, nThreads>>>(states, IMAGE_WIDTH, IMAGE_HEIGHT, 1234ULL);
-    render<<<(IMAGE_HEIGHT * IMAGE_WIDTH)/nThreads, nThreads>>>(*world, cam, states, buffer_d);
-    cudaMemcpy(buffer_h, buffer_d, buffer_size, cudaMemcpyDeviceToHost);
+    initialize_random_states<<<blocks, threads>>>(states_d, IMAGE_WIDTH, IMAGE_HEIGHT, 1234ULL);
+    CUDA_CHECK(cudaGetLastError());
+    render<<<blocks, threads>>>(world_d, cam_d, states_d, buffer_d);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaMemcpy(buffer_h, buffer_d, buffer_size, cudaMemcpyDeviceToHost));
     
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, IMAGE_WIDTH, IMAGE_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, buffer_h);
 
@@ -227,9 +226,12 @@ int main()
         s_was_pressed = s_pressed;
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
-        initialize_random_states<<<(IMAGE_HEIGHT * IMAGE_WIDTH)/nThreads, nThreads>>>(states, IMAGE_WIDTH, IMAGE_HEIGHT, 1234ULL);
-        render<<<(IMAGE_HEIGHT * IMAGE_WIDTH)/nThreads, nThreads>>>(*world, cam, states, buffer_d);
-        cudaMemcpy(buffer_h, buffer_d, buffer_size, cudaMemcpyDeviceToHost);
+        initialize_random_states<<<blocks, threads>>>(states_d, IMAGE_WIDTH, IMAGE_HEIGHT, 1234ULL);
+        CUDA_CHECK(cudaGetLastError());
+        render<<<blocks, threads>>>(world_d, cam_d, states_d, buffer_d);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaMemcpy(buffer_h, buffer_d, buffer_size, cudaMemcpyDeviceToHost)); 
 
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, buffer_h);
 
@@ -246,19 +248,12 @@ int main()
     glDeleteTextures(1, &tex);
     glfwTerminate();
 
-    cudaFree(ground_mat);
-    cudaFree(ground);
-    cudaFree(s1_mat);
-    cudaFree(s1);
-    cudaFree(s2_mat);
-    cudaFree(s2);
-    cudaFree(s3_mat);
-    cudaFree(s3);
-    cudaFree(world);
-    cudaFree(cam);
+    free_world<<<1,1>>>(list_d, world_d, cam_d);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+    
     cudaFree(buffer_d);
-    cudaFree(states); 
-    cudaFree(objects);
+    cudaFree(states_d); 
     cudaFreeHost(buffer_h);
     return 0;
 }
