@@ -6,6 +6,7 @@
 #include <thread>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+#include <time.h>
 
 #include "cuda/common.cuh"
 #include "cuda/bvh.cuh"
@@ -17,23 +18,13 @@
 #include <cuda_runtime.h>
 
 // settings
-#define nThreads 512
-#define IMAGE_WIDTH 1200
+#define BLOCK_DIM 16
+#define IMAGE_WIDTH 512
 #define ASPECT_RATIO (16.0 / 9.0)
 #define IMAGE_HEIGHT ((int)(IMAGE_WIDTH / ASPECT_RATIO))
 #define WORLD_SIZE 4
 
-// __global__ void test_init(hittable** list, size_t size){
-//     int i = 0;
-//     list[i++] = new sphere(point3(-5, 2, 0), 1.0, new dielectric(1.5));
-//     list[i++] = new sphere(point3(-3, 4, 0), 1.0, new dielectric(1.5));
-//     list[i++] = new sphere(point3(-1, 0, 0), 1.0, new dielectric(1.5));
-//     list[i++] = new sphere(point3(7, 1, 0), 1.0, new dielectric(1.5));
-//     list[i++] = new sphere(point3(2, 4, 0), 1.0, new dielectric(1.5));
-// }
-// __global__ void test(hittable** list, size_t size) {
-//     bvh_node::sort(list, 0, size, bvh_node::box_x_compare);
-// }
+float Theta = 0.0f;
 
 void save_frame(const char* filename, int image_height, int image_width, int channels, const uint8_t* buffer);
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
@@ -48,117 +39,69 @@ do {                                                                            
     }                                                                             \
 } while (0)
 
-__global__ void init_scene(hittable** list_d, hittable_list* world_d, hittable_list* bvh_world_d, bvh_node* node_d, camera* cam_d){
-
-    new (cam_d) camera();
-    cam_d->aspect_ratio = ASPECT_RATIO;
-    cam_d->image_width = IMAGE_WIDTH;
-    cam_d->samples_per_pixel = 100;
-    cam_d->max_depth = 50;
-
-    cam_d->vfov = 20;
-    cam_d->lookfrom = point3(13, 2, 3);
-    cam_d->lookat = point3(0, 0, 0);
-    cam_d->vup = vec3(0, 1, 0);
-
-    cam_d->defocus_angle = 0.6;
-    cam_d->focus_dist = 10.0;
-    cam_d->initialize();
-
-    size_t i = 0;
-    list_d[i++] = new sphere(point3(0, -1000, 0), 1000, new lambertian(color(0.5, 0.5, 0.5)));
-    list_d[i++] = new sphere(point3(0, 1, 0), 1.0, new dielectric(1.5));
-    list_d[i++] = new sphere(point3(-4, 1, 0), 1.0, new lambertian(color(0.4, 0.2, 0.1)));
-    list_d[i++] = new sphere(point3(4, 1, 0), 1.0, new metal(color(0.7, 0.6, 0.5), 0.0));
-    new (world_d) hittable_list(list_d, i);
-    new (node_d) bvh_node(world_d);
-    new (bvh_world_d) hittable_list(node_d);
+extern __global__ void kernel_warmup();
+extern __global__ void init_scene(hittable** list_d, hittable_list* world_d, hittable_list* bvh_world_d, bvh_node* node_d, camera* cam_d);
+extern __global__ void free_world(hittable** list_d);
+extern __global__ void initialize_random_states(seed_t* states, int width, int height, unsigned long long seed);
+extern __global__ void render(hittable* world, camera* cam, seed_t* states, uint8_t* buffer);
+extern __global__ void update_camera(camera* cam, float* theta);
+void rotate_left(){
+    Theta += 5.0;
+}
+void rotate_right(){
+    Theta -= 5.0;
 }
 
-__global__ void free_world(hittable** list_d) {
-
-    for(int i=0; i < WORLD_SIZE; i++) {
-        delete ((sphere *)list_d[i])->mat;
-        delete list_d[i];
+void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods){
+    if (action != GLFW_PRESS) return;
+    switch(key){
+        case GLFW_KEY_LEFT:
+            rotate_left();
+            break;
+        case GLFW_KEY_RIGHT:
+            rotate_right();
+            break;
     }
 }
 
-__global__ void initialize_random_states(seed_t* states, int width, int height, unsigned long long seed){
-	int pixel_x = blockIdx.x * blockDim.x + threadIdx.x;
-	int pixel_y = blockIdx.y * blockDim.y + threadIdx.y;
-	
-	if(!(pixel_x < width && pixel_y < height)){
-		return;
-	}
-
-	int index = pixel_y * width + pixel_x;
-	curand_init(seed, index, 0, &states[index]);
-}
-
-__global__ void render(hittable* world, camera* cam, seed_t* states, uint8_t* buffer) {
-
-		int pixel_x = blockIdx.x * blockDim.x + threadIdx.x;
-		int pixel_y = blockIdx.y * blockDim.y + threadIdx.y;
-		
-		if(!(pixel_x < cam->image_width && pixel_y < cam->image_height)){
-			return;
-		}
-
-		int index = pixel_y * cam->image_width + pixel_x;
-		seed_t local_state = states[index];
-		
-		color pixel_color(0, 0, 0);
-		for (int sample = 0; sample < cam->samples_per_pixel; sample++) {
-			ray r = cam->get_ray(pixel_x, pixel_y, &local_state);
-			pixel_color += cam->ray_color(r, cam->max_depth, *world, &local_state);
-		}
-			get_colors(cam->pixel_samples_scale * pixel_color, &buffer[index * 3]);
-
-}
-
-
 int main()
 {
-    // size_t test_size = sizeof(hittable*) * 5;
-    // hittable** test_list_d;
-    // CUDA_CHECK(cudaMalloc((void**) &test_list_d, test_size));
-    // hittable** test_list_h = (hittable**)malloc(test_size);
-    // test_init<<<1,1>>>(test_list_d, 5);
-    // cudaMemcpy(test_list_h, test_list_d, test_size, cudaMemcpyDeviceToHost);
-    // test<<<1,1>>>(test_list_d, 5);
-    // cudaMemcpy(test_list_h, test_list_d, test_size, cudaMemcpyDeviceToHost);
-    // cudaDeviceSynchronize();
-
+    // kernel_warmup<<<1,1>>>();
+    
     hittable** list_d;
     CUDA_CHECK(cudaMalloc((void**) &list_d, sizeof(hittable*) * WORLD_SIZE));
 
     hittable_list* world_d;
     CUDA_CHECK(cudaMalloc((void**) &world_d, sizeof(hittable_list)));
-
+    
     bvh_node* node_d;
     CUDA_CHECK(cudaMalloc((void**) &node_d, sizeof(bvh_node)));
-
+    
     hittable_list* bvh_world_d;
     CUDA_CHECK(cudaMalloc((void**) &bvh_world_d, sizeof(hittable_list)));
-
+    
     camera* cam_d;
     CUDA_CHECK(cudaMalloc((void**) &cam_d, sizeof(camera)));
     
     size_t buffer_size = IMAGE_WIDTH * IMAGE_HEIGHT * 3 * sizeof(uint8_t);
-
+    
     uint8_t* buffer_d;
     CUDA_CHECK(cudaMalloc((void**) &buffer_d, buffer_size));
-
+    
     uint8_t* buffer_h;
     CUDA_CHECK(cudaMallocHost((void**) &buffer_h, buffer_size));
-
+    
     seed_t* states_d;
     CUDA_CHECK(cudaMalloc((void**) &states_d, IMAGE_WIDTH * IMAGE_HEIGHT * sizeof(seed_t)));
 
-    int tx = 8; int ty = 8;
-    dim3 blocks(IMAGE_WIDTH/tx+1,IMAGE_HEIGHT/ty+1);
-    dim3 threads(tx,ty);
-
+    float* theta_d;
+    CUDA_CHECK(cudaMalloc((void**) &theta_d, sizeof(float)));
+    
+    int tx = BLOCK_DIM; int ty = BLOCK_DIM;
+    dim3 threads(tx, ty, 1);
+    dim3 grid(IMAGE_WIDTH/threads.x,IMAGE_HEIGHT/threads.y);
+    
+    clock_t start_time = clock();
     init_scene<<<1,1>>>(list_d, world_d, bvh_world_d, node_d, cam_d);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
@@ -179,7 +122,7 @@ int main()
     }
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-
+    glfwSetKeyCallback(window, key_callback);
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
         std::cerr << "Failed to initialize GLAD\n";
         return -1;
@@ -224,9 +167,9 @@ int main()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     // Render and upload
-    initialize_random_states<<<blocks, threads>>>(states_d, IMAGE_WIDTH, IMAGE_HEIGHT, 1234ULL);
+    initialize_random_states<<<grid, threads>>>(states_d, IMAGE_WIDTH, IMAGE_HEIGHT, 1234ULL);
     CUDA_CHECK(cudaGetLastError());
-    render<<<blocks, threads>>>(bvh_world_d, cam_d, states_d, buffer_d);
+    render<<<grid, threads>>>(bvh_world_d, cam_d, states_d, buffer_d);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
     CUDA_CHECK(cudaMemcpy(buffer_h, buffer_d, buffer_size, cudaMemcpyDeviceToHost));
@@ -234,23 +177,33 @@ int main()
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, IMAGE_WIDTH, IMAGE_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, buffer_h);
 
     bool s_was_pressed = false;
-
+    // int frames = 0;
+    // start_time = clock();
     // Loop
     while (!glfwWindowShouldClose(window)) {
         
         bool s_pressed = glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS;
+        // bool left_pressed = glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS;
+        // bool right_pressed = glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS;
         if (s_pressed && !s_was_pressed) {
             save_frame("output.png", IMAGE_HEIGHT, IMAGE_WIDTH, 3, buffer_h);
         }
         s_was_pressed = s_pressed;
         glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
-        initialize_random_states<<<blocks, threads>>>(states_d, IMAGE_WIDTH, IMAGE_HEIGHT, 1234ULL);
+        
+        if(Theta != 0.0f){
+            CUDA_CHECK(cudaMemcpy(theta_d, &Theta, sizeof(float), cudaMemcpyHostToDevice));
+            update_camera<<<1,1>>>(cam_d, theta_d);
+            Theta = 0.0f;
+        }
+        initialize_random_states<<<grid, threads>>>(states_d, IMAGE_WIDTH, IMAGE_HEIGHT, 1234ULL);
         CUDA_CHECK(cudaGetLastError());
-        render<<<blocks, threads>>>(bvh_world_d, cam_d, states_d, buffer_d);
+        render<<<grid, threads>>>(bvh_world_d, cam_d, states_d, buffer_d);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
-        CUDA_CHECK(cudaMemcpy(buffer_h, buffer_d, buffer_size, cudaMemcpyDeviceToHost)); 
+        CUDA_CHECK(cudaMemcpy(buffer_h, buffer_d, buffer_size, cudaMemcpyDeviceToHost));
+        
 
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, buffer_h);
 
@@ -260,7 +213,14 @@ int main()
 
         glfwSwapBuffers(window);
         glfwPollEvents();
+        // frames++;
     }
+
+    // clock_t end_time = clock();
+    // double elapsed = ((double)(end_time - start_time)) / CLOCKS_PER_SEC * 1000.0;
+
+    // printf("Average time for rendering a single frame: %d", elapsed/frames);
+
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
     glDeleteBuffers(1, &EBO);

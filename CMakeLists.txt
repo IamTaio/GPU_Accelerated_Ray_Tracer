@@ -6,7 +6,7 @@ find_package(OpenGL REQUIRED)
 # CMake had issues finding glfw3
 find_package(glfw3 REQUIRED)
 
-add_executable(GPUAccRayTracer main.cu)
+add_executable(GPUAccRayTracer main.cu kernels.cu)
 
 target_include_directories(GPUAccRayTracer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/)
 target_include_directories(GPUAccRayTracer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cuda/)
@@ -27,7 +27,7 @@ target_link_libraries(GPUAccRayTracer PRIVATE OpenGL::GL)
 # CUDA
 target_link_libraries(GPUAccRayTracer PRIVATE CUDA::cudart CUDA::curand)
 
-set_target_properties(GPUAccRayTracer PROPERTIES
-    VS_DEBUGGER_ENVIRONMENT 
-    "__NV_PRIME_RENDER_OFFLOAD=1;__GLX_VENDOR_LIBRARY_NAME=nvidia"
-)
+# set_target_properties(GPUAccRayTracer PROPERTIES
+#     VS_DEBUGGER_ENVIRONMENT 
+#     "__NV_PRIME_RENDER_OFFLOAD=1;__GLX_VENDOR_LIBRARY_NAME=nvidia"
+# )
