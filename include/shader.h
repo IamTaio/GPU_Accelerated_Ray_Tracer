@@ -12,6 +12,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <filesystem>
 
 class Shader
 {
@@ -21,6 +22,10 @@ public:
     // ------------------------------------------------------------------------
     Shader(const char* vertexPath, const char* fragmentPath)
     {
+        std::cout << "Loading vertex shader:   "
+            << std::filesystem::absolute(vertexPath) << "\n";
+        std::cout << "Loading fragment shader: "
+            << std::filesystem::absolute(fragmentPath) << "\n";
         // 1. retrieve the vertex/fragment source code from filePath
         std::string vertexCode;
         std::string fragmentCode;

@@ -2,7 +2,6 @@
 
 #include "hittable.cuh"
 #include "common.cuh"
-#include <thrust/device_vector.h>
 
 #define OBJS_MAX_SIZE 1024
 class hittable_list : public hittable {
