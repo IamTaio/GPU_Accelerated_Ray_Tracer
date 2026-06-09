@@ -6,22 +6,34 @@
 #include "hittable.cuh"
 #include "hittable_list.cuh"
 
-#include <thrust/sort.h>
-#include <thrust/device_vector.h>
-
 class bvh_node : public hittable {
 public:
-	__device__ bvh_node(hittable_list list) : bvh_node(list.objects, 0, list.objects.size()) {
 
+	__device__ ~bvh_node(){
+		// if (left == right){
+		// 	delete left;
+		// 	left = nullptr;
+		// 	right = nullptr;
+		// 	return;
+		// }
+		// delete left;
+		// delete right;
+		// left = nullptr;
+		// right = nullptr;
 	}
 
-	__device__ bvh_node(thrust::device_vector<hittable*>& objects, size_t start, size_t end) {
-		left = (bvh_node*)malloc(sizeof(bvh_node));
-		right = (bvh_node*)malloc(sizeof(bvh_node));
-		bbox = aabb::empty;
+	__device__ bvh_node(hittable_list list) : bvh_node(list.get_objects(), 0, list.capacity) {}
 
-		for (size_t object_index = start; object_index < end; object_index++) {
-			bbox = aabb(bbox, (*objects[object_index]).bounding_box());
+	__device__ bvh_node(hittable** objects, size_t start, size_t end) {
+		size_t  object_span = end - start;
+		hittable** copy = (hittable**)malloc(sizeof(hittable*) * object_span);
+		for(int i = 0; i < object_span; i++){
+			copy[i] = objects[start + i];
+		}
+		bbox = aabb::empty();
+
+		for (size_t object_index = 0; object_index < object_span; object_index++) {
+			bbox = aabb(bbox, (*copy[object_index]).bounding_box());
 		}
 
 		int axis = bbox.longest_axis();
@@ -30,25 +42,24 @@ public:
 			: (axis == 1) ? box_y_compare
 			: box_z_compare;
 
-		size_t  object_span = end - start;
 
 		if (object_span == 1) {
-			left = right = objects[start];
+			left = right = copy[0];
 		}
 		else if (object_span == 2) {
-			left = objects[start];
-			right = objects[start + 1];
+			left = copy[0];
+			right = copy[1];
 		}
 		else {
-			thrust::sort(objects.begin() + start, objects.begin() + end, comparator);
+			sort(copy, 0, object_span, comparator);
 
-			auto mid = start + object_span / 2;
+			auto mid = object_span / 2;
 			
-			new (left) bvh_node(objects, start, mid);
-			new (right) bvh_node(objects, mid, end);
-			// left = &bvh_node(objects, start, mid);
-			// right = &bvh_node(objects, mid, end);
+			left = new bvh_node(copy, 0, mid);
+			right = new bvh_node(copy, mid, object_span);
 		}
+
+		free(copy);
 	}
 
 	__device__ bool hit(const ray& r, interval ray_t, hit_record& rec) const {
@@ -62,9 +73,9 @@ public:
 		return hit_left || hit_right;
 	}
 
-	__host__ __device__ aabb bounding_box() const { return bbox; }
+	 __device__ aabb bounding_box() const { return bbox; }
 
-private:
+// private:
 	hittable* left;
 	hittable* right;
 	aabb bbox;
@@ -86,4 +97,36 @@ private:
 	__device__ static bool box_z_compare(const hittable* a, const hittable* b) {
 		return box_compare(a, b, 2);
 	}
+
+	// Sorting does not need to be ranged anymore 
+	// since the list of objects that gets passed 
+	// is already a copy of the interest range.
+	__device__ static void sort(hittable** list, size_t start, size_t end, bool(*comparator)(const hittable* a, const hittable* b)) {
+    if (start == end - 1)
+        return;
+
+    size_t mid = start + (end - start) / 2;
+
+    sort(list, start, mid, comparator);
+    sort(list, mid, end, comparator);
+
+	int l = start, r = mid, s = 0;
+	hittable** sorted = (hittable**)malloc((end - start) * sizeof(hittable*));
+    while (l < mid && r < end) {
+        if (comparator(list[l], list[r])){
+            sorted[s++] = list[l++];
+		}
+        else
+            sorted[s++] = list[r++];
+    }
+    while (l < mid) sorted[s++] = list[l++];
+    while (r < end) sorted[s++] = list[r++];
+
+	for(int i = 0; i < (end - start); i++){
+		list[start+i] = sorted[i];
+	}
+
+    free(sorted);
+}
 };
+

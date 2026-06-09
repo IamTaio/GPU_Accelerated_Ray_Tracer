@@ -19,7 +19,7 @@ public:
 
 	__device__ double time() const { return tm; }
 
-	__device__ __host__ point3 at(double t) const {
+	__device__  point3 at(double t) const {
 		return orig + t * dir;
 	}
 };

@@ -27,17 +27,17 @@ public:
 class hittable {
 public:
 	ShapeType m_type;
-	__device__ virtual ~hittable() = default;
+	__device__ virtual ~hittable() {}
 
 	__device__ virtual bool hit(const ray& r, interval ray_t, hit_record& rec) const = 0;
 
-	__host__ __device__ virtual aabb bounding_box() const = 0;
+	 __device__ virtual aabb bounding_box() const = 0;
 };
 
 // #include "sphere.cuh"
 // #include "bvh.cuh"
 
-// __host__ __device__ inline bool hittable::hit(const ray& r, interval ray_t, hit_record& rec) const {
+//  __device__ inline bool hittable::hit(const ray& r, interval ray_t, hit_record& rec) const {
 // 	switch (m_type) {
 // 		case ShapeType::Sphere:   return ((sphere*)this)->hit(r, ray_t, rec);
 // 		case ShapeType::BVH:	  return ((bvh_node*)this)->hit(r, ray_t, rec);

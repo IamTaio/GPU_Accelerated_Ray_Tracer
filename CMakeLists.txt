@@ -6,11 +6,7 @@ find_package(OpenGL REQUIRED)
 # CMake had issues finding glfw3
 find_package(glfw3 REQUIRED)
 
-add_executable(GPUAccRayTracer
-    main.cu
-    aabb.cu
-    interval.cu
-)
+add_executable(GPUAccRayTracer main.cu)
 
 target_include_directories(GPUAccRayTracer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include/)
 target_include_directories(GPUAccRayTracer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/cuda/)
