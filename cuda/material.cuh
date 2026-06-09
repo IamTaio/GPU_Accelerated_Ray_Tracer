@@ -2,15 +2,16 @@
 
 #include "hittable.cuh"
 #include "common.cuh"
+#include "texture.cuh"
 
 // enum class MaterialType{Lambertian, Metal, Dielectric};
 
 class material {
 public:
 	// MaterialType m_type;
-	__host__ __device__ virtual ~material() = default;
+	 __device__ virtual ~material() = default;
 
-	__device__ virtual bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, seed_t seed) const {
+	__device__ virtual bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, seed_t* seed) const {
 		// switch (m_type)
 		// {
 		// case MaterialType::Lambertian:
@@ -30,12 +31,14 @@ public:
 class lambertian : public material {
 private:
 	color albedo;
+	texture* tex;
 public:
 	
+	 __device__ lambertian(const color& albedo) : tex(new solid_color(albedo)) {}
+	 __device__ lambertian(texture* tex) : tex(tex) {}
 
-	__host__ __device__ lambertian(const color& albedo) : albedo(albedo) {}
-
-	__device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, seed_t seed)
+	 __device__ ~lambertian() override { delete tex; }
+	__device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, seed_t* seed)
 		const override {
 		
 		auto scatter_direction = rec.normal + random_unit_vector(seed);
@@ -45,7 +48,7 @@ public:
 		}
 
 		scattered = ray(rec.p, scatter_direction, r_in.time());
-		attenuation = albedo;
+		attenuation = tex->value(rec.u, rec.v, rec.p);
 		return true;
 	}
 };
@@ -55,9 +58,9 @@ private:
 	color albedo;
 	double fuzz;
 public:
-	__host__ __device__ metal(const color& albedo, double fuzz) : albedo(albedo), fuzz(fuzz < 1 ? fuzz : 1) {}
+	 __device__ metal(const color& albedo, double fuzz) : albedo(albedo), fuzz(fuzz < 1 ? fuzz : 1) {}
 
-	__device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, seed_t seed)
+	__device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, seed_t* seed)
 		const override {
 		vec3 reflected = reflect(r_in.direction(), rec.normal);
 		reflected = unit_vector(reflected) + (fuzz * random_unit_vector(seed));
@@ -78,9 +81,9 @@ private:
 		return r0 + (1 - r0) * pow((1 - cosine), 5);
 	}
 public:
-	__host__ __device__ dielectric(double refraction_index) : refraction_index(refraction_index) {}
+	 __device__ dielectric(double refraction_index) : refraction_index(refraction_index) {}
 
-	__device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, seed_t seed)
+	__device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, seed_t* seed)
 		const override {
 		attenuation = color(1.0, 1.0, 1.0);
 		double ri = rec.front_face ? (1.0 / refraction_index) : refraction_index;
@@ -103,4 +106,3 @@ public:
 		return true;
 	}
 };
-
