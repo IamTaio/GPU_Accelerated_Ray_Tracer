@@ -10,29 +10,30 @@ class bvh_node : public hittable {
 public:
 
 	__device__ ~bvh_node(){
-		if (left == right){
-			delete left;
-			left = nullptr;
-			right = nullptr;
-			return;
-		}
-		delete left;
-		delete right;
-		left = nullptr;
-		right = nullptr;
+		// if (left == right){
+		// 	delete left;
+		// 	left = nullptr;
+		// 	right = nullptr;
+		// 	return;
+		// }
+		// delete left;
+		// delete right;
+		// left = nullptr;
+		// right = nullptr;
 	}
 
-	__device__ bvh_node(hittable_list list) : bvh_node(list.get_objects(), 0, list.capacity) {
-
-	}
+	__device__ bvh_node(hittable_list list) : bvh_node(list.get_objects(), 0, list.capacity) {}
 
 	__device__ bvh_node(hittable** objects, size_t start, size_t end) {
-		// left = (bvh_node*)malloc(sizeof(bvh_node));
-		// right = (bvh_node*)malloc(sizeof(bvh_node));
+		size_t  object_span = end - start;
+		hittable** copy = (hittable**)malloc(sizeof(hittable*) * object_span);
+		for(int i = 0; i < object_span; i++){
+			copy[i] = objects[start + i];
+		}
 		bbox = aabb::empty();
 
-		for (size_t object_index = start; object_index < end; object_index++) {
-			bbox = aabb(bbox, (*objects[object_index]).bounding_box());
+		for (size_t object_index = 0; object_index < object_span; object_index++) {
+			bbox = aabb(bbox, (*copy[object_index]).bounding_box());
 		}
 
 		int axis = bbox.longest_axis();
@@ -41,25 +42,24 @@ public:
 			: (axis == 1) ? box_y_compare
 			: box_z_compare;
 
-		size_t  object_span = end - start;
 
 		if (object_span == 1) {
-			left = right = objects[start];
+			left = right = copy[0];
 		}
 		else if (object_span == 2) {
-			left = objects[start];
-			right = objects[start + 1];
+			left = copy[0];
+			right = copy[1];
 		}
 		else {
-			sort(objects, start, end, comparator);
+			sort(copy, 0, object_span, comparator);
 
-			auto mid = start + object_span / 2;
+			auto mid = object_span / 2;
 			
-			// new (left) bvh_node(objects, start, mid);
-			// new (right) bvh_node(objects, mid, end);
-			left = new bvh_node(objects, start, mid);
-			right = new bvh_node(objects, mid, end);
+			left = new bvh_node(copy, 0, mid);
+			right = new bvh_node(copy, mid, object_span);
 		}
+
+		free(copy);
 	}
 
 	__device__ bool hit(const ray& r, interval ray_t, hit_record& rec) const {
@@ -75,7 +75,7 @@ public:
 
 	 __device__ aabb bounding_box() const { return bbox; }
 
-private:
+// private:
 	hittable* left;
 	hittable* right;
 	aabb bbox;
@@ -98,7 +98,10 @@ private:
 		return box_compare(a, b, 2);
 	}
 
-	__device__ void sort(hittable** list, size_t start, size_t end, bool(*comparator)(const hittable* a, const hittable* b)) {
+	// Sorting does not need to be ranged anymore 
+	// since the list of objects that gets passed 
+	// is already a copy of the interest range.
+	__device__ static void sort(hittable** list, size_t start, size_t end, bool(*comparator)(const hittable* a, const hittable* b)) {
     if (start == end - 1)
         return;
 

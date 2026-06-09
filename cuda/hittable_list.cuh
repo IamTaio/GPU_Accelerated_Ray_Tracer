@@ -38,11 +38,7 @@ public:
 	}
 
 	__device__ hittable** get_objects(){
-		hittable** copy = (hittable**)malloc(sizeof(hittable*) * capacity);
-		for(int i = 0; i < capacity; i++){
-			copy[i] = objects[i];
-		}
-		return copy;
+		return objects;
 	}
 
 	// __device__ hittable* get(){return;}

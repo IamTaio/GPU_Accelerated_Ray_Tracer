@@ -18,15 +18,22 @@
 
 // settings
 #define nThreads 512
-#define IMAGE_WIDTH 400
+#define IMAGE_WIDTH 1200
 #define ASPECT_RATIO (16.0 / 9.0)
 #define IMAGE_HEIGHT ((int)(IMAGE_WIDTH / ASPECT_RATIO))
 #define WORLD_SIZE 4
 
-
-__global__ void add(int *a, int *b, int *c) {
-*c = *a + *b;
-}
+// __global__ void test_init(hittable** list, size_t size){
+//     int i = 0;
+//     list[i++] = new sphere(point3(-5, 2, 0), 1.0, new dielectric(1.5));
+//     list[i++] = new sphere(point3(-3, 4, 0), 1.0, new dielectric(1.5));
+//     list[i++] = new sphere(point3(-1, 0, 0), 1.0, new dielectric(1.5));
+//     list[i++] = new sphere(point3(7, 1, 0), 1.0, new dielectric(1.5));
+//     list[i++] = new sphere(point3(2, 4, 0), 1.0, new dielectric(1.5));
+// }
+// __global__ void test(hittable** list, size_t size) {
+//     bvh_node::sort(list, 0, size, bvh_node::box_x_compare);
+// }
 
 void save_frame(const char* filename, int image_height, int image_width, int channels, const uint8_t* buffer);
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
@@ -41,7 +48,7 @@ do {                                                                            
     }                                                                             \
 } while (0)
 
-__global__ void init_scene(hittable** list_d, hittable_list* world_d, hittable_list* bvh_world_d, camera* cam_d){
+__global__ void init_scene(hittable** list_d, hittable_list* world_d, hittable_list* bvh_world_d, bvh_node* node_d, camera* cam_d){
 
     new (cam_d) camera();
     cam_d->aspect_ratio = ASPECT_RATIO;
@@ -64,16 +71,16 @@ __global__ void init_scene(hittable** list_d, hittable_list* world_d, hittable_l
     list_d[i++] = new sphere(point3(-4, 1, 0), 1.0, new lambertian(color(0.4, 0.2, 0.1)));
     list_d[i++] = new sphere(point3(4, 1, 0), 1.0, new metal(color(0.7, 0.6, 0.5), 0.0));
     new (world_d) hittable_list(list_d, i);
-    new (bvh_world_d) hittable_list(new bvh_node(*world_d));
+    new (node_d) bvh_node(world_d);
+    new (bvh_world_d) hittable_list(node_d);
 }
 
-__global__ void free_world(hittable** list_d, hittable_list* bvh_world_d) {
+__global__ void free_world(hittable** list_d) {
 
     for(int i=0; i < WORLD_SIZE; i++) {
         delete ((sphere *)list_d[i])->mat;
         delete list_d[i];
     }
-    delete bvh_world_d->get_objects()[0];
 }
 
 __global__ void initialize_random_states(seed_t* states, int width, int height, unsigned long long seed){
@@ -112,12 +119,24 @@ __global__ void render(hittable* world, camera* cam, seed_t* states, uint8_t* bu
 
 int main()
 {
+    // size_t test_size = sizeof(hittable*) * 5;
+    // hittable** test_list_d;
+    // CUDA_CHECK(cudaMalloc((void**) &test_list_d, test_size));
+    // hittable** test_list_h = (hittable**)malloc(test_size);
+    // test_init<<<1,1>>>(test_list_d, 5);
+    // cudaMemcpy(test_list_h, test_list_d, test_size, cudaMemcpyDeviceToHost);
+    // test<<<1,1>>>(test_list_d, 5);
+    // cudaMemcpy(test_list_h, test_list_d, test_size, cudaMemcpyDeviceToHost);
+    // cudaDeviceSynchronize();
 
     hittable** list_d;
     CUDA_CHECK(cudaMalloc((void**) &list_d, sizeof(hittable*) * WORLD_SIZE));
 
     hittable_list* world_d;
     CUDA_CHECK(cudaMalloc((void**) &world_d, sizeof(hittable_list)));
+
+    bvh_node* node_d;
+    CUDA_CHECK(cudaMalloc((void**) &node_d, sizeof(bvh_node)));
 
     hittable_list* bvh_world_d;
     CUDA_CHECK(cudaMalloc((void**) &bvh_world_d, sizeof(hittable_list)));
@@ -140,7 +159,7 @@ int main()
     dim3 blocks(IMAGE_WIDTH/tx+1,IMAGE_HEIGHT/ty+1);
     dim3 threads(tx,ty);
 
-    init_scene<<<1,1>>>(list_d, world_d, bvh_world_d, cam_d);
+    init_scene<<<1,1>>>(list_d, world_d, bvh_world_d, node_d, cam_d);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -248,10 +267,11 @@ int main()
     glDeleteTextures(1, &tex);
     glfwTerminate();
 
-    free_world<<<1,1>>>(list_d, bvh_world_d);
+    free_world<<<1,1>>>(list_d);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaDeviceSynchronize());
     
+    cudaFree(node_d);
     cudaFree(bvh_world_d);
     cudaFree(world_d);
     cudaFree(cam_d);
