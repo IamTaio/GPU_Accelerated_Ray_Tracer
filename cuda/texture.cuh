@@ -1,11 +1,11 @@
 #pragma once
 
 #include "common.cuh"
-#include "read_image.h"
+// #include "read_image.h"
 
 class texture {
 public:
-    __device__ virtual ~texture() = default;
+    __device__ virtual ~texture() {}
     __device__ virtual color value(double u, double v, const point3& p) const = 0;
 };
 

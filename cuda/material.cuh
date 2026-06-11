@@ -9,7 +9,7 @@
 class material {
 public:
 	// MaterialType m_type;
-	 __device__ virtual ~material() = default;
+	 __device__ virtual ~material() {}
 
 	__device__ virtual bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, seed_t* seed) const {
 		// switch (m_type)
