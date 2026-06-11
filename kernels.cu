@@ -80,7 +80,6 @@ __global__ void update_camera(camera* cam, float* theta){
 
 __global__ void render(hittable* world, camera* cam, seed_t* states, uint8_t* buffer) {
 
-        
 		int pixel_x = blockIdx.x * blockDim.x + threadIdx.x;
 		int pixel_y = blockIdx.y * blockDim.y + threadIdx.y;
 		

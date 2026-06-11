@@ -183,8 +183,6 @@ int main()
     while (!glfwWindowShouldClose(window)) {
         
         bool s_pressed = glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS;
-        // bool left_pressed = glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS;
-        // bool right_pressed = glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS;
         if (s_pressed && !s_was_pressed) {
             save_frame("output.png", IMAGE_HEIGHT, IMAGE_WIDTH, 3, buffer_h);
         }
@@ -196,15 +194,14 @@ int main()
             CUDA_CHECK(cudaMemcpy(theta_d, &Theta, sizeof(float), cudaMemcpyHostToDevice));
             update_camera<<<1,1>>>(cam_d, theta_d);
             Theta = 0.0f;
+            initialize_random_states<<<grid, threads>>>(states_d, IMAGE_WIDTH, IMAGE_HEIGHT, 1234ULL);
+            CUDA_CHECK(cudaGetLastError());
+            render<<<grid, threads>>>(bvh_world_d, cam_d, states_d, buffer_d);
+            CUDA_CHECK(cudaGetLastError());
+            CUDA_CHECK(cudaDeviceSynchronize());
+            CUDA_CHECK(cudaMemcpy(buffer_h, buffer_d, buffer_size, cudaMemcpyDeviceToHost));
         }
-        initialize_random_states<<<grid, threads>>>(states_d, IMAGE_WIDTH, IMAGE_HEIGHT, 1234ULL);
-        CUDA_CHECK(cudaGetLastError());
-        render<<<grid, threads>>>(bvh_world_d, cam_d, states_d, buffer_d);
-        CUDA_CHECK(cudaGetLastError());
-        CUDA_CHECK(cudaDeviceSynchronize());
-        CUDA_CHECK(cudaMemcpy(buffer_h, buffer_d, buffer_size, cudaMemcpyDeviceToHost));
         
-
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, buffer_h);
 
         shader.use();
@@ -213,7 +210,6 @@ int main()
 
         glfwSwapBuffers(window);
         glfwPollEvents();
-        // frames++;
     }
 
     // clock_t end_time = clock();
