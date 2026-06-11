@@ -2,6 +2,7 @@
 
 #include "hittable.cuh"
 #include "common.cuh"
+#include "texture.cuh"
 
 // enum class MaterialType{Lambertian, Metal, Dielectric};
 
@@ -30,11 +31,13 @@ public:
 class lambertian : public material {
 private:
 	color albedo;
+	texture* tex;
 public:
 	
+	 __device__ lambertian(const color& albedo) : tex(new solid_color(albedo)) {}
+	 __device__ lambertian(texture* tex) : tex(tex) {}
 
-	 __device__ lambertian(const color& albedo) : albedo(albedo) {}
-
+	 __device__ ~lambertian() override { delete tex; }
 	__device__ bool scatter(const ray& r_in, const hit_record& rec, color& attenuation, ray& scattered, seed_t* seed)
 		const override {
 		
@@ -45,7 +48,7 @@ public:
 		}
 
 		scattered = ray(rec.p, scatter_direction, r_in.time());
-		attenuation = albedo;
+		attenuation = tex->value(rec.u, rec.v, rec.p);
 		return true;
 	}
 };
@@ -103,4 +106,3 @@ public:
 		return true;
 	}
 };
-
